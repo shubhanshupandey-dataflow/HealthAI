@@ -1,12 +1,14 @@
 # Production on a VM:  docker compose up -d --build
-# Needs .env next to this file (keys + DOMAIN=your.subdomain), and the subdomain's DNS A record
-# pointing at the VM. Caddy gets the HTTPS certificate automatically.
+# Needs .env next to this file. The backend listens on 127.0.0.1 only (default port 8000,
+# change with BACKEND_PORT in .env); the VM's nginx proxies the subdomain to it over HTTPS.
 
 services:
   backend:
     build: .
     image: adele-sophie
     env_file: .env
+    ports:
+      - "127.0.0.1:${BACKEND_PORT:-8000}:8000"
     volumes:
       - sophie-data:/app/data
     healthcheck:
@@ -30,22 +32,5 @@ services:
     stop_grace_period: 60s
     restart: unless-stopped
 
-  caddy:
-    image: caddy:2
-    env_file: .env
-    ports:
-      - "80:80"
-      - "443:443"
-      - "443:443/udp"
-    volumes:
-      - ./Caddyfile:/etc/caddy/Caddyfile:ro
-      - caddy-data:/data
-      - caddy-config:/config
-    depends_on:
-      - backend
-    restart: unless-stopped
-
 volumes:
   sophie-data:
-  caddy-data:
-  caddy-config:

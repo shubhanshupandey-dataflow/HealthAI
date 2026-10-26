@@ -1,5 +1,0 @@
-# HTTPS in front of the backend. DOMAIN comes from .env (e.g. DOMAIN=sophie.example.com).
-{$DOMAIN} {
-	encode gzip
-	reverse_proxy backend:8000
-}
