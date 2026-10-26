@@ -1,0 +1,18 @@
+# Secrets and local state never go into the image
+.env
+data/
+logs/
+KMS/
+.cache/
+
+# Rebuilt inside the image
+.venv/
+admin/node_modules/
+admin/dist/
+__pycache__/
+*.pyc
+
+# Windows-only launchers and notes
+*.ps1
+scripts/
+HANDOFF.md

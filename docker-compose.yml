@@ -1,0 +1,51 @@
+# Production on a VM:  docker compose up -d --build
+# Needs .env next to this file (keys + DOMAIN=your.subdomain), and the subdomain's DNS A record
+# pointing at the VM. Caddy gets the HTTPS certificate automatically.
+
+services:
+  backend:
+    build: .
+    image: adele-sophie
+    env_file: .env
+    volumes:
+      - sophie-data:/app/data
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/api/health', timeout=4)"]
+      interval: 30s
+      timeout: 5s
+      start_period: 30s
+    restart: unless-stopped
+
+  agent:
+    image: adele-sophie
+    pull_policy: never  # built locally by the backend service
+    command: ["python", "agent/agent.py", "start"]
+    env_file: .env
+    environment:
+      BACKEND_URL: http://backend:8000
+    depends_on:
+      backend:
+        condition: service_healthy
+    # Give calls in progress time to finish on restart/redeploy
+    stop_grace_period: 60s
+    restart: unless-stopped
+
+  caddy:
+    image: caddy:2
+    env_file: .env
+    ports:
+      - "80:80"
+      - "443:443"
+      - "443:443/udp"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy-data:/data
+      - caddy-config:/config
+    depends_on:
+      - backend
+    restart: unless-stopped
+
+volumes:
+  sophie-data:
+  caddy-data:
+  caddy-config:

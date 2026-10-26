@@ -1,0 +1,10 @@
+.env
+.venv/
+.cache/
+data/
+__pycache__/
+*.pyc
+admin/node_modules/
+admin/dist/
+KMS/
+logs/

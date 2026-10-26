@@ -1,0 +1,13 @@
+# Voice agent (LiveKit Agents + Deepgram + Google Gemini) - versions tested together
+livekit-agents[deepgram,google,anthropic,openai,silero,turn-detector,cartesia,elevenlabs]==1.8.8
+livekit-plugins-noise-cancellation==0.3.2
+fast-langdetect==1.1.0  # replies in the caller's language
+
+# Backend API + admin panel host
+fastapi==0.159.1
+uvicorn[standard]==0.54.0
+sqlmodel==0.0.48
+pyjwt==2.15.1
+python-dotenv==1.2.4
+httpx==0.28.1
+tzdata==2026.5
