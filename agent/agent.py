@@ -69,7 +69,14 @@ from livekit.plugins.cartesia.models import TTSDefaultVoiceId as CARTESIA_DEFAUL
 
 from clinic_api import ClinicAPI  # noqa: E402
 from prompts import build_instructions, render_greeting  # noqa: E402
-from language import ONE_MOMENT, VoiceLanguage, detect_language, first_sentence_ready  # noqa: E402
+from language import (  # noqa: E402
+    DEFAULT_LANGUAGE,
+    ONE_MOMENT,
+    VoiceLanguage,
+    detect_language,
+    first_sentence_ready,
+    localise_filler,
+)
 from spoken_text import SpokenTextFilter  # noqa: E402
 
 try:  # LiveKit Cloud background voice cancellation (optional)
@@ -295,10 +302,16 @@ class Receptionist(Agent):
             yield frame
 
     def _caller_language(self, chat_ctx: lk_llm.ChatContext) -> str:
-        """Language of the caller's last message, falling back to the call's current language."""
+        """Language for this reply's "let me check": the caller's last message when it's clearly in
+        another language (they've just switched), otherwise the language Sophie is already speaking.
+        A short English phrase in a Hindi or Malayalam call ("yes, book it") doesn't pull her back
+        to English."""
         for item in reversed(chat_ctx.items):
             if getattr(item, "role", None) == "user":
-                return detect_language(getattr(item, "text_content", None) or "") or self.voice.current
+                lang = detect_language(getattr(item, "text_content", None) or "")
+                if lang and lang != DEFAULT_LANGUAGE:
+                    return lang
+                break
         return self.voice.current
 
     async def llm_node(self, chat_ctx: lk_llm.ChatContext, tools: list, model_settings: Any):
@@ -315,6 +328,27 @@ class Receptionist(Agent):
         spoke = False
         called: set[str] = set()
         language = self._caller_language(chat_ctx)
+        # In a non-English call, hold back the opening sentence until it's complete, so an English
+        # "let me check" the model slips in can be swapped for the caller's language.
+        holding = language != DEFAULT_LANGUAGE
+        held = ""
+
+        def hold(text: str) -> str:
+            nonlocal holding, held
+            if not holding:
+                return text
+            held += text
+            if not first_sentence_ready(held):
+                return ""
+            return release()
+
+        def release() -> str:
+            nonlocal holding, held
+            if not holding:
+                return ""
+            holding = False
+            text, held = localise_filler(held, language), ""
+            return text
 
         def filler_for(tool_name: str) -> str | None:
             nonlocal spoke
@@ -329,7 +363,7 @@ class Receptionist(Agent):
 
         async for chunk in Agent.default.llm_node(self, chat_ctx, tools, model_settings):
             if isinstance(chunk, str):
-                text = guard.feed(chunk)
+                text = hold(guard.feed(chunk))
                 spoke = spoke or bool(text.strip())
                 if text:
                     yield text
@@ -337,17 +371,20 @@ class Receptionist(Agent):
             if isinstance(chunk, lk_llm.ChatChunk) and chunk.delta is not None:
                 delta = chunk.delta
                 if delta.content:
-                    text = guard.feed(delta.content)
+                    text = hold(guard.feed(delta.content))
                     spoke = spoke or bool(text.strip())
                     if text != delta.content:
                         chunk = chunk.model_copy(update={"delta": delta.model_copy(update={"content": text})})
                 if delta.tool_calls:
+                    if opening := release():
+                        spoke = spoke or bool(opening.strip())
+                        yield opening
                     called.update(call.name for call in delta.tool_calls)
                     if filler := filler_for(delta.tool_calls[0].name):
                         yield filler
             yield chunk
 
-        tail = guard.finish()
+        tail = release() + guard.finish()
         if tail:
             spoke = spoke or bool(tail.strip())
             yield tail

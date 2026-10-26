@@ -55,7 +55,34 @@ ONE_MOMENT = {
     "gu": "એક ક્ષણ, હું જોઈ લઉં.",
     "mr": "एक क्षण, मी बघते.",
     "pa": "ਇੱਕ ਪਲ, ਮੈਂ ਦੇਖ ਲੈਂਦੀ ਹਾਂ।",
+    "ml": "ഒരു നിമിഷം, ഞാൻ നോക്കട്ടെ.",
+    "kn": "ಒಂದು ಕ್ಷಣ, ನಾನು ನೋಡುತ್ತೇನೆ.",
+    "sv": "Ett ögonblick, jag kollar det åt dig.",
+    "da": "Et øjeblik, jeg tjekker det lige.",
+    "no": "Et øyeblikk, jeg sjekker det for deg.",
+    "fi": "Hetkinen, tarkistan asian.",
+    "cs": "Moment, hned to zkontroluji.",
+    "sk": "Moment, hneď to skontrolujem.",
+    "hu": "Egy pillanat, máris megnézem.",
+    "hr": "Trenutak, odmah provjeravam.",
+    "bg": "Един момент, веднага ще проверя.",
+    "el": "Μια στιγμή, το ελέγχω αμέσως.",
+    "he": "רק רגע, אני בודקת.",
+    "th": "สักครู่นะคะ ขอตรวจสอบให้ค่ะ",
+    "vi": "Xin chờ một chút, tôi kiểm tra ngay.",
+    "id": "Sebentar, saya cek dulu.",
+    "ms": "Sebentar, saya semak dahulu.",
+    "tl": "Sandali lang po, titingnan ko.",
+    "ka": "ერთი წუთით, შევამოწმებ.",
 }
+
+# An English "let me check" the model sometimes opens with even when the call is in another language.
+_ENGLISH_FILLER = re.compile(
+    r"^\s*(?:(?:okay|ok|right|sure|lovely|great|perfect)[,.!]?\s+)?"
+    r"(?:(?:let me|i'll|i will) (?:just )?(?:check|look|have a look|see|find|pull|get|pop|note|sort|move|book)|"
+    r"one moment|just a moment|bear with me|give me a (?:moment|second|sec))\b[^.!?]*[.!?]*\s*",
+    re.IGNORECASE,
+)
 
 _SENTENCE_END = re.compile(r"[.!?;:।。！？]")
 _NON_LATIN = re.compile(r"[^\x00-ɏ\s\d\W]")  # a letter outside the Latin alphabets
@@ -103,6 +130,22 @@ def detect_language(text: str) -> str | None:
     if words >= 6 and score >= 0.45:
         return lang
     return None
+
+
+def localise_filler(text: str, language: str) -> str:
+    """Swaps an English "let me check" at the start of a reply for the same in `language`.
+
+    Otherwise the English sentence is spoken in an English voice, and the voice stays English
+    for the rest of the reply (it's picked from the first sentence).
+    """
+    if language == DEFAULT_LANGUAGE:
+        return text
+    match = _ENGLISH_FILLER.match(text)
+    if not match or _NON_LATIN.search(match.group()):
+        return text
+    logger.info("replaced an English filler in a %s call: %r", language, match.group().strip())
+    replacement = ONE_MOMENT.get(language)
+    return (replacement + " " if replacement else "") + text[match.end():]
 
 
 def first_sentence_ready(text: str) -> bool:
