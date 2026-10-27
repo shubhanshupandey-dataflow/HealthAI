@@ -1,5 +1,3 @@
-import json
-import secrets
 from datetime import date
 from typing import Optional
 
@@ -11,6 +9,7 @@ from .. import config, timeutil
 from ..auth import require_admin
 from ..db import get_session
 from ..domain import get_agent_settings, get_clinic
+from ..livekit_calls import web_call_token
 from ..models import ClinicHours, Closure
 
 router = APIRouter(prefix="/api", tags=["settings"], dependencies=[Depends(require_admin)])
@@ -213,39 +212,4 @@ def system_status():
 
 @router.post("/livekit/token")
 def create_test_call_token(body: TokenIn):
-    if not config.configured_keys()["livekit"]:
-        raise HTTPException(
-            status_code=400,
-            detail="LiveKit is not configured. Add LIVEKIT_URL, LIVEKIT_API_KEY and LIVEKIT_API_SECRET to .env",
-        )
-    from livekit import api as lkapi
-
-    room_name = f"web-call-{secrets.token_hex(4)}"
-    identity = f"web-caller-{secrets.token_hex(3)}"
-    attributes = {"channel": "web"}
-    if body.caller_number.strip():
-        attributes["caller_number"] = body.caller_number.strip()
-
-    token = (
-        lkapi.AccessToken(config.LIVEKIT_API_KEY, config.LIVEKIT_API_SECRET)
-        .with_identity(identity)
-        .with_name(body.caller_name or "Web caller")
-        .with_attributes(attributes)
-        .with_grants(
-            lkapi.VideoGrants(
-                room_join=True, room=room_name, can_publish=True, can_subscribe=True, can_publish_data=True
-            )
-        )
-    )
-    if config.AGENT_NAME:
-        token = token.with_room_config(
-            lkapi.RoomConfiguration(
-                agents=[lkapi.RoomAgentDispatch(agent_name=config.AGENT_NAME, metadata=json.dumps(attributes))]
-            )
-        )
-    return {
-        "server_url": config.LIVEKIT_URL,
-        "token": token.to_jwt(),
-        "room_name": room_name,
-        "identity": identity,
-    }
+    return web_call_token(body.caller_name, body.caller_number)

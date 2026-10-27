@@ -224,3 +224,16 @@ class AdminUser(SQLModel, table=True):
     name: str = "Admin"
     password_hash: str
     created_at: NaiveDatetime = Field(default_factory=_now)
+
+
+class ShareLink(SQLModel, table=True):
+    """A public link that lets anyone try the assistant without signing in, until it expires."""
+
+    __tablename__ = "share_links"
+
+    id: Optional[int] = Field(default=None, primary_key=True)
+    token: str = Field(index=True, unique=True)
+    created_by: str = ""
+    created_at: NaiveDatetime = Field(default_factory=_now)
+    expires_at: NaiveDatetime
+    revoked: bool = False

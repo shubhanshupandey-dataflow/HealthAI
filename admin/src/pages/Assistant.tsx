@@ -17,8 +17,9 @@ import { BrandLogo } from '../components/Brand'
 import { Orb, type OrbMode } from '../components/Orb'
 import { buttonClass } from '../components/ui'
 import { errorMessage, get, post } from '../lib/api'
+import { fmtDateTime } from '../lib/format'
 import { startRingback, type Ringback } from '../lib/ringback'
-import type { AgentSettings, ClinicSettings, Paged, Patient, SystemStatus } from '../lib/types'
+import type { AgentSettings, ClinicSettings, Paged, Patient, ShareLinkInfo, SystemStatus } from '../lib/types'
 
 type Phase = 'idle' | 'ringing' | 'live' | 'ended'
 
@@ -49,15 +50,36 @@ function clock(seconds: number) {
   return `${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, '0')}`
 }
 
-export default function Assistant() {
-  const { data: agentSettings } = useQuery({ queryKey: ['settings', 'agent'], queryFn: () => get<AgentSettings>('/settings/agent') })
-  const { data: clinic } = useQuery({ queryKey: ['settings', 'clinic'], queryFn: () => get<ClinicSettings>('/settings/clinic') })
-  const { data: status } = useQuery({ queryKey: ['system'], queryFn: () => get<SystemStatus>('/system/status') })
+/**
+ * The call page. Staff open it from the sidebar (signed in, can pick a caller ID); with `shareToken`
+ * it's the public page from a share link: no sign-in, no caller ID - the caller verifies themselves.
+ */
+export default function Assistant({ shareToken }: { shareToken?: string }) {
+  const staff = !shareToken
+  const { data: agentSettings } = useQuery({
+    queryKey: ['settings', 'agent'],
+    queryFn: () => get<AgentSettings>('/settings/agent'),
+    enabled: staff,
+  })
+  const { data: clinic } = useQuery({
+    queryKey: ['settings', 'clinic'],
+    queryFn: () => get<ClinicSettings>('/settings/clinic'),
+    enabled: staff,
+  })
+  const { data: status } = useQuery({ queryKey: ['system'], queryFn: () => get<SystemStatus>('/system/status'), enabled: staff })
   const { data: patients } = useQuery({
     queryKey: ['patients', 'sample'],
     queryFn: () => get<Paged<Patient>>('/patients', { page_size: 6 }),
+    enabled: staff,
   })
-  const name = agentSettings?.agent_name || 'Sophie'
+  const { data: share, error: shareError } = useQuery({
+    queryKey: ['share', shareToken],
+    queryFn: () => get<ShareLinkInfo>(`/public/try/${shareToken}`),
+    enabled: !staff,
+    retry: false,
+  })
+  const name = (staff ? agentSettings?.agent_name : share?.agent_name) || 'Sophie'
+  const clinicName = staff ? clinic?.name : share?.clinic_name
 
   const [phase, setPhase] = useState<Phase>('idle')
   const [conn, setConn] = useState<Connection | null>(null)
@@ -88,7 +110,11 @@ export default function Assistant() {
     ring.current = startRingback() // started inside the click, so the browser allows the sound
     setPhase('ringing')
     try {
-      setConn(await post<Connection>('/livekit/token', { caller_number: callerNumber, caller_name: 'Demo caller' }))
+      setConn(
+        staff
+          ? await post<Connection>('/livekit/token', { caller_number: callerNumber, caller_name: 'Demo caller' })
+          : await post<Connection>(`/public/try/${shareToken}/call`),
+      )
     } catch (err) {
       stopRing()
       setPhase('idle')
@@ -119,12 +145,28 @@ export default function Assistant() {
   // Stable callbacks: CallBody re-renders many times a second (voice levels), so inline
   // functions would keep resetting its timers.
   const noAnswer = useCallback(
-    () => hangUp(`${name} didn’t pick up. Is the voice agent running? Start it with start.ps1.`),
-    [hangUp, name],
+    () =>
+      hangUp(
+        staff
+          ? `${name} didn’t pick up. Is the voice agent running? Start it with start.ps1.`
+          : `${name} didn’t pick up. Please try again in a minute.`,
+      ),
+    [hangUp, name, staff],
   )
   const endCall = useCallback(() => hangUp(), [hangUp])
 
   const missing = status ? REQUIRED_KEYS.filter((k) => !status.keys[k]) : []
+
+  if (shareError) {
+    return (
+      <div className="brand-backdrop flex min-h-full flex-col items-center justify-center gap-6 px-5 text-center">
+        <BrandLogo className="h-9" />
+        <p className="flex max-w-md items-start gap-2 rounded-2xl border border-amber-200 bg-white/80 px-4 py-3 text-left text-sm text-amber-800">
+          <AlertCircle className="mt-0.5 size-4 shrink-0" /> {errorMessage(shareError)}
+        </p>
+      </div>
+    )
+  }
 
   return (
     <div className="brand-backdrop flex min-h-full flex-col">
@@ -136,10 +178,18 @@ export default function Assistant() {
           </span>
         </div>
         <div className="flex items-center gap-3 text-sm">
-          <span className="hidden text-slate-600 md:inline">{clinic?.name}</span>
-          <a href="/calls" target="_blank" rel="noopener noreferrer" className={buttonClass('secondary', 'sm')}>
-            Call logs <ArrowUpRight className="size-3.5" />
-          </a>
+          <span className="hidden text-slate-600 md:inline">{clinicName}</span>
+          {staff ? (
+            <a href="/calls" target="_blank" rel="noopener noreferrer" className={buttonClass('secondary', 'sm')}>
+              Call logs <ArrowUpRight className="size-3.5" />
+            </a>
+          ) : (
+            share && (
+              <span className="rounded-full border border-slate-200 bg-white/70 px-3 py-1 text-xs text-slate-600">
+                Test link · expires {fmtDateTime(share.expires_at)}
+              </span>
+            )
+          )}
         </div>
       </header>
 
@@ -166,7 +216,7 @@ export default function Assistant() {
           onCall={call}
           callerNumber={callerNumber}
           onCallerNumber={setCallerNumber}
-          patients={patients?.items.filter((p) => p.phone) ?? []}
+          patients={staff ? (patients?.items.filter((p) => p.phone) ?? []) : undefined}
           error={error}
           missing={missing}
         />
@@ -209,7 +259,8 @@ function CallBody({
   onCall: () => void
   callerNumber: string
   onCallerNumber: (value: string) => void
-  patients: Patient[]
+  /** Caller IDs to pick from (staff only); without them the caller verifies themselves on the call. */
+  patients?: Patient[]
   error: string
   missing: readonly string[]
 }) {
@@ -315,21 +366,27 @@ function CallBody({
               <Phone className="size-5" />
               {phase === 'ended' ? 'Call again' : `Call ${name}`}
             </button>
-            <label className="flex items-center gap-2 text-sm text-slate-600">
-              Calling from
-              <select
-                value={callerNumber}
-                onChange={(e) => onCallerNumber(e.target.value)}
-                className="h-9 rounded-full border border-slate-300 bg-white/80 px-3 text-sm text-slate-800 shadow-sm focus:border-teal-500 focus:ring-2 focus:ring-teal-500/20 focus:outline-none"
-              >
-                <option value="">an unknown number (new caller)</option>
-                {patients.map((p) => (
-                  <option key={p.id} value={p.phone}>
-                    {p.full_name} · {p.phone}
-                  </option>
-                ))}
-              </select>
-            </label>
+            {patients ? (
+              <label className="flex items-center gap-2 text-sm text-slate-600">
+                Calling from
+                <select
+                  value={callerNumber}
+                  onChange={(e) => onCallerNumber(e.target.value)}
+                  className="h-9 rounded-full border border-slate-300 bg-white/80 px-3 text-sm text-slate-800 shadow-sm focus:border-teal-500 focus:ring-2 focus:ring-teal-500/20 focus:outline-none"
+                >
+                  <option value="">an unknown number (new caller)</option>
+                  {patients.map((p) => (
+                    <option key={p.id} value={p.phone}>
+                      {p.full_name} · {p.phone}
+                    </option>
+                  ))}
+                </select>
+              </label>
+            ) : (
+              <p className="max-w-sm text-center text-sm text-slate-600">
+                To check or change an appointment, {name} will ask for your name and date of birth.
+              </p>
+            )}
           </>
         )}
         {phase === 'ringing' && (

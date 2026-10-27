@@ -15,7 +15,7 @@ from . import timeutil
 from .config import ADMIN_DIST
 from .db import engine, init_db
 from .domain import get_clinic
-from .routers import activity, agent_api, appointments, auth_routes, patients, settings_routes, staff, voices
+from .routers import activity, agent_api, appointments, auth_routes, patients, settings_routes, share_links, staff, voices
 from .seed import seed
 
 
@@ -38,8 +38,9 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-for module in (auth_routes, patients, appointments, staff, settings_routes, activity, agent_api, voices):
+for module in (auth_routes, patients, appointments, staff, settings_routes, activity, agent_api, voices, share_links):
     app.include_router(module.router)
+app.include_router(share_links.public_router)  # "try the assistant" links - no sign-in
 
 
 @app.get("/api/health")

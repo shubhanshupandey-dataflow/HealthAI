@@ -1,5 +1,5 @@
 import { lazy, Suspense, type ReactNode } from 'react'
-import { Navigate, Route, Routes } from 'react-router-dom'
+import { Navigate, Route, Routes, useParams } from 'react-router-dom'
 import Layout from './components/Layout'
 import { LoadingBlock } from './components/ui'
 import { getToken } from './lib/api'
@@ -18,6 +18,16 @@ import Settings from './pages/Settings'
 // The assistant (LiveKit client SDK) is large - only loaded when someone opens it.
 const Assistant = lazy(() => import('./pages/Assistant'))
 
+/** Public call page from a share link - no sign-in. */
+function TryAssistant() {
+  const { token = '' } = useParams()
+  return (
+    <Suspense fallback={<LoadingBlock />}>
+      <Assistant shareToken={token} />
+    </Suspense>
+  )
+}
+
 function RequireAuth({ children }: { children: ReactNode }) {
   if (!getToken()) return <Navigate to="/login" replace />
   return <>{children}</>
@@ -27,6 +37,7 @@ export default function App() {
   return (
     <Routes>
       <Route path="/login" element={<Login />} />
+      <Route path="/try/:token" element={<TryAssistant />} />
       {/* full-screen call page, opened in its own tab from the sidebar */}
       <Route
         path="/assistant"

@@ -270,3 +270,20 @@ export interface User {
   email: string
   name: string
 }
+
+/** A public "try the assistant" link (no sign-in needed until it expires). */
+export interface ShareLink {
+  id: number
+  token: string
+  path: string
+  created_by: string
+  created_at: string
+  expires_at: string
+}
+
+/** What the public try page knows about a share link. */
+export interface ShareLinkInfo {
+  agent_name: string
+  clinic_name: string
+  expires_at: string
+}
